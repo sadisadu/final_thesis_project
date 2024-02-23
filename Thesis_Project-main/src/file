@@ -1,0 +1,100 @@
+export const updateProjectStatus = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const update: any = await User.findOneAndUpdate(
+      {
+        project: { $ne: null },
+        "project.id": id,
+      },
+      {
+        "project.$.status": status,
+      },
+      { new: true }
+    ).select({
+      project: {
+        $filter: {
+          input: "$project",
+          as: "item",
+          cond: { $eq: ["$$item.id", id] },
+        },
+      },
+      vendorInfo: 1,
+    });
+    const data = update?.project[0];
+    if (status === "accept") {
+      const vendor = update?.vendorInfo;
+
+      let packages: any = [];
+
+      //package er ei 4ta field default thakte hobe
+      update?.project[0].package.map((item: any) => {
+        const array = [
+          item.id,
+          item.package_name,
+          ethers.parseUnits(item.price.toString(), "ether"),
+          ethers.parseUnits(item.number_of_items.toString(), "ether"),
+        ];
+        return packages.push(array);
+      });
+
+      const customHttpProvider: any = new ethers.JsonRpcProvider(rpcUrl);
+      const signer = new ethers.Wallet(ownerAddress, customHttpProvider);
+
+      const contractFactory = new ethers.Contract(
+        contractAddress,
+        CryptoFunding.abi,
+        signer
+      );
+
+      const transaction = await contractFactory.createProject(
+        data?.id,
+        data?.name,
+        data?.category,
+        data?.short_description,
+        {
+          name: vendor.companyName,
+          about_company: vendor.aboutCompany,
+          number_of_stakeholder: ethers.parseUnits(
+            vendor.noOfStakeHolder,
+            "ether"
+          ),
+          establishment_date: vendor.establishDate,
+          asset_amount: ethers.parseUnits(vendor.assetAmount, "ether"),
+          investment_need: ethers.parseUnits(vendor.investmentNeed, "ether"),
+          addresses: {
+            country: vendor.country,
+            city: vendor.city,
+            post_code: vendor.postalCode,
+            addresses: vendor.address ? vendor.address : "N/A",
+          },
+        },
+        packages
+      );
+
+      await transaction.wait();
+    }
+
+    res.status(200).send({
+      status: "success",
+      message: "Data find successfully!",
+      data: data ? data : null,
+    });
+  } catch (error: any) {
+    console.log(error);
+
+    if (error.code === 11000) {
+      res.status(500).json({
+        status: "error",
+        message: `Duplicate Data ${
+          error.keyValue[${Object.keys(error.keyValue)}]
+        }`,
+      });
+    } else {
+      res.status(500).json({
+        status: "error",
+        message: error.message,
+      });
+    }
+  }
+};
